@@ -618,23 +618,32 @@ body{font-family:"DM Sans",sans-serif;background:var(--K);color:var(--B);overflo
 
 <!-- MODAL: CHAT -->
 <div class="ov" id="ovChat">
-  <div class="modal">
-    <button class="mcls" onclick="hideOv('ovChat')">✕</button>
-    <h2 class="mh">💬 Pesan</h2>
-    <div id="chatListView">
-      <div id="chatList" style="max-height:250px;overflow-y:auto;margin-bottom:13px"></div>
+  <div class="modal" style="display:flex;flex-direction:column;height:92vh;max-height:600px;padding:0;overflow:hidden">
+    <div style="padding:16px 18px 12px;border-bottom:1px solid #f0f0e8;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+      <h2 class="mh" style="margin:0;font-size:1.1rem">💬 Pesan</h2>
+      <button class="mcls" style="position:static" onclick="hideOv('ovChat')">✕</button>
+    </div>
+    <div id="chatListView" style="flex:1;overflow-y:auto;padding:12px">
+      <div id="chatList" style="margin-bottom:13px"></div>
       <button class="fbtn" onclick="newChat()">✉️ Mulai Chat Baru</button>
     </div>
-    <div id="chatBoxView" style="display:none">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #eee">
-        <button onclick="backChat()" style="background:none;border:none;cursor:pointer;color:var(--H);font-size:.9rem;font-family:'DM Sans',sans-serif">← Kembali</button>
-        <div class="sav" id="chatAv" style="width:32px;height:32px;font-size:.82rem">?</div>
-        <div><strong id="chatWithName" style="font-size:.84rem">-</strong><div id="chatSubtitle" style="font-size:.68rem;color:#888">Desa Makaaruyen</div></div>
+    <div id="chatBoxView" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid #eee;flex-shrink:0;background:#fafaf8">
+        <button onclick="backChat()" style="background:none;border:none;cursor:pointer;color:var(--H);font-size:.88rem;font-family:'DM Sans',sans-serif;font-weight:600;padding:4px 8px;border-radius:6px">← Kembali</button>
+        <div style="width:32px;height:32px;background:var(--H);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:.82rem;flex-shrink:0" id="chatAv">?</div>
+        <div>
+          <strong id="chatWithName" style="font-size:.86rem">-</strong>
+          <div style="font-size:.68rem;color:#888">Desa Makaaruyen · Online</div>
+        </div>
       </div>
-      <div class="cm" id="chatMsgs"></div>
-      <div class="chin">
-        <input type="text" id="chatIn" placeholder="Tulis pesan..." onkeydown="if(event.key==='Enter')kirimPesan()">
-        <button class="cbtn" onclick="kirimPesan()">Kirim</button>
+      <div id="chatMsgs" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:4px;background:#fefefe"></div>
+      <div style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid #eee;background:#fff;flex-shrink:0">
+        <input type="text" id="chatIn" placeholder="Tulis pesan..." 
+          style="flex:1;padding:10px 14px;border:1.5px solid #e0e0d8;border-radius:50px;font-family:'DM Sans',sans-serif;font-size:.84rem;outline:none;background:#f8f8f0;transition:border .2s"
+          onfocus="this.style.borderColor='var(--H2)';this.style.background='#fff'"
+          onblur="this.style.borderColor='#e0e0d8';this.style.background='#f8f8f0'"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();kirimPesan()}">
+        <button onclick="kirimPesan()" style="background:var(--H);color:#fff;border:none;border-radius:50%;width:40px;height:40px;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .2s" onmouseover="this.style.background='var(--H2)'" onmouseout="this.style.background='var(--H)'">➤</button>
       </div>
     </div>
   </div>
@@ -1292,43 +1301,52 @@ function updateNotifBadge() {
 }
 
 // ============================================================
-// CHAT — REWRITE TOTAL (fix bug: pesan hilang setelah kirim ke-1)
-// Root cause: listener .on('value') ditimpa tanpa di-off() dulu,
-// menyebabkan konflik double listener. Firebase Rules juga perlu
-// diset ke ".write": true agar semua user bisa push pesan.
+// ============================================================
+// CHAT — Real-time two-way messaging (seperti WhatsApp/Instagram)
 // ============================================================
 
-// Buat room ID yang bersih dan konsisten
+// Buat room ID unik berdasarkan buyerId + nama penjual
 function makeChatRoomId(buyerId, penjualName) {
   const safe = penjualName.replace(/[^a-zA-Z0-9]/g,'_').substring(0,30);
   return buyerId + '__' + safe;
 }
+
+// Listener aktif — disimpan agar bisa di-off dengan tepat
+let _chatListener = null;
+let _chatListListener = null;
 
 function renderChatList() {
   if (!ME) return;
   const el = document.getElementById('chatList');
   el.innerHTML = '<div style="text-align:center;padding:12px;color:#aaa;font-size:.8rem">Memuat...</div>';
 
-  // Gunakan buyerId untuk query pembeli (lebih reliable dari userId)
-  let query;
-  if (ROLE === 'penjual') {
-    const tokoNama = ME.toko || ME.nama;
-    query = db.ref('chats').orderByChild('penjual').equalTo(tokoNama);
-  } else {
-    query = db.ref('chats').orderByChild('buyerId').equalTo(ME.id);
+  // Matikan listener lama kalau ada
+  if (_chatListListener) {
+    db.ref('chats').off('value', _chatListListener);
+    _chatListListener = null;
   }
 
-  query.once('value', snap => {
+  // Real-time listener untuk daftar chat — auto update kalau ada pesan baru
+  _chatListListener = db.ref('chats').on('value', snap => {
     const rooms = [];
-    snap.forEach(c => rooms.push({key: c.key, ...c.val()}));
-    // Fallback penjual: coba dengan ME.nama jika toko tidak dapat hasil
-    if (!rooms.length && ROLE === 'penjual' && ME.toko && ME.toko !== ME.nama) {
-      db.ref('chats').orderByChild('penjual').equalTo(ME.nama).once('value', snap2 => {
-        snap2.forEach(c => rooms.push({key: c.key, ...c.val()}));
-        _tampilDaftarChat(el, rooms);
-      });
-      return;
-    }
+    snap.forEach(c => {
+      const d = c.val();
+      if (!d) return;
+      // Pembeli: lihat chat miliknya saja
+      // Penjual: lihat chat ke tokonya saja
+      if (ROLE === 'penjual') {
+        const tokoNama = ME.toko || ME.nama || '';
+        if (d.penjual === tokoNama || d.penjual === ME.nama) {
+          rooms.push({key: c.key, ...d});
+        }
+      } else {
+        if (d.buyerId === ME.id) {
+          rooms.push({key: c.key, ...d});
+        }
+      }
+    });
+    // Urutkan dari yang terbaru
+    rooms.sort((a,b) => (b.lastTs||0) - (a.lastTs||0));
     _tampilDaftarChat(el, rooms);
   });
 }
@@ -1336,21 +1354,23 @@ function renderChatList() {
 function _tampilDaftarChat(el, rooms) {
   if (!rooms.length) {
     el.innerHTML = '<div style="text-align:center;padding:18px;color:#888;font-size:.83rem">Belum ada percakapan.<br>' +
-      (ROLE==='pembeli' ? 'Buka produk → "Tanya Penjual"' : 'Belum ada pembeli yang menghubungi') + '</div>';
+      (ROLE==='pembeli' ? '💡 Buka produk → klik "Tanya Penjual"' : '💡 Belum ada pembeli yang menghubungi') + '</div>';
     return;
   }
   el.innerHTML = rooms.map(r => {
-    const nama = ROLE === 'penjual' ? (r.buyerName || r.buyerId || 'Pembeli') : (r.penjual || 'Penjual');
-    // Encode parameter untuk onclick agar aman
+    const nama = ROLE === 'penjual' ? (r.buyerName || 'Pembeli') : (r.penjual || 'Penjual');
+    const inisial = (nama||'?')[0].toUpperCase();
     const bName = (r.buyerName||'').replace(/'/g,"\\'");
-    return `<div style="display:flex;align-items:center;gap:10px;padding:9px;border-radius:8px;cursor:pointer;border-bottom:1px solid #f0f0e8;transition:background .15s"
-      onmouseover="this.style.background='#f8f8f0'" onmouseout="this.style.background=''"
-      onclick="_bukaRoom('${r.key}','${(r.penjual||'').replace(/'/g,"\\'")}','${r.buyerId||''}','${bName}')">
-      <div class="sav" style="width:34px;height:34px;font-size:.82rem">${(nama||'?')[0].toUpperCase()}</div>
+    const pName = (r.penjual||'').replace(/'/g,"\\'");
+    return `<div style="display:flex;align-items:center;gap:10px;padding:11px 9px;border-radius:10px;cursor:pointer;border-bottom:1px solid #f0f0e8;transition:background .15s"
+      onmouseover="this.style.background='#f0faf4'" onmouseout="this.style.background=''"
+      onclick="_bukaRoom('${r.key}','${pName}','${r.buyerId||''}','${bName}')">
+      <div style="width:38px;height:38px;background:var(--H);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:.9rem;flex-shrink:0">${inisial}</div>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:.83rem">${nama}</div>
-        <div style="font-size:.71rem;color:#888;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${r.lastMsg||'Mulai percakapan...'}</div>
+        <div style="font-weight:700;font-size:.84rem">${nama}</div>
+        <div style="font-size:.71rem;color:#999;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:2px">${r.lastMsg||'Mulai percakapan...'}</div>
       </div>
+      <div style="font-size:.65rem;color:#bbb;flex-shrink:0">${r.lastTs ? new Date(r.lastTs).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
     </div>`;
   }).join('');
 }
@@ -1360,25 +1380,29 @@ function chatWith(targetName) {
 
   let roomId, penjualName, buyerId, buyerName;
   if (ROLE === 'penjual') {
-    // Penjual chat ke pembeli
     const buyer = allUsers.find(u => u.nama === targetName || u.id === targetName);
-    buyerId = buyer ? buyer.id : ('buyer_'+targetName.replace(/[^a-zA-Z0-9]/g,'_'));
+    buyerId = buyer ? buyer.id : ('guest_'+targetName.replace(/[^a-zA-Z0-9]/g,'_'));
     buyerName = buyer ? buyer.nama : targetName;
     penjualName = ME.toko || ME.nama;
     roomId = makeChatRoomId(buyerId, penjualName);
   } else {
-    // Pembeli chat ke penjual
     penjualName = targetName;
     buyerId = ME.id;
     buyerName = ME.nama;
     roomId = makeChatRoomId(ME.id, penjualName);
   }
 
+  // Buat room kalau belum ada, lalu buka
   db.ref('chats/'+roomId).once('value', snap => {
     const doOpen = () => {
-      hideOv('ovOrdersMasuk');
+      // Tutup modal lain kalau ada
+      if (document.getElementById('ovOrdersMasuk').classList.contains('on')) {
+        document.getElementById('ovOrdersMasuk').classList.remove('on');
+      }
       _bukaRoom(roomId, penjualName, buyerId, buyerName);
-      if (!document.getElementById('ovChat').classList.contains('on')) showOv('ovChat');
+      if (!document.getElementById('ovChat').classList.contains('on')) {
+        document.getElementById('ovChat').classList.add('on');
+      }
     };
     if (!snap.exists()) {
       db.ref('chats/'+roomId).set({
@@ -1386,8 +1410,15 @@ function chatWith(targetName) {
         buyerId: buyerId,
         buyerName: buyerName,
         lastMsg: '',
+        lastTs: Date.now(),
         tgl: Date.now()
-      }).then(doOpen).catch(e => toast('err','Gagal membuat chat: '+e.message));
+      }).then(doOpen).catch(e => {
+        if (e.message && e.message.toLowerCase().includes('permission')) {
+          toast('err','❌ Firebase Rules belum diset! Buka Firebase Console → Realtime Database → Rules → set write:true');
+        } else {
+          toast('err','Gagal membuat chat: '+e.message);
+        }
+      });
     } else {
       doOpen();
     }
@@ -1395,50 +1426,54 @@ function chatWith(targetName) {
 }
 
 function _bukaRoom(roomId, penjualName, buyerId, buyerName) {
-  // PENTING: Matikan listener lama sebelum attach baru
-  // Ini adalah fix utama untuk bug "pesan hilang setelah kirim pertama"
-  if (curChat && curChat !== roomId) {
-    db.ref('chats/'+curChat+'/msgs').off('value');
+  // Matikan listener pesan lama sebelum attach yang baru
+  if (_chatListener) {
+    if (curChat) db.ref('chats/'+curChat+'/msgs').off('value', _chatListener);
+    _chatListener = null;
   }
 
   curChat = roomId;
   curChat_penjual = penjualName;
   curChat_userId = buyerId;
 
-  const namaLawan = ROLE === 'penjual' ? (buyerName || buyerId || 'Pembeli') : (penjualName || 'Penjual');
+  const namaLawan = ROLE === 'penjual' ? (buyerName || 'Pembeli') : (penjualName || 'Penjual');
   document.getElementById('chatWithName').textContent = namaLawan;
   document.getElementById('chatAv').textContent = (namaLawan||'?')[0].toUpperCase();
   document.getElementById('chatListView').style.display = 'none';
-  document.getElementById('chatBoxView').style.display = 'block';
+  document.getElementById('chatBoxView').style.display = 'flex';
   document.getElementById('chatIn').value = '';
+  document.getElementById('chatIn').focus();
 
-  if (!document.getElementById('ovChat').classList.contains('on')) showOv('ovChat');
+  const el = document.getElementById('chatMsgs');
+  el.innerHTML = '<div style="text-align:center;color:#bbb;font-size:.8rem;padding:20px">Memuat pesan...</div>';
 
-  // Attach listener real-time — akan update otomatis setiap ada pesan baru
-  db.ref('chats/'+roomId+'/msgs').on('value', snap => {
+  // Real-time listener — setiap pesan baru langsung muncul di kedua sisi
+  _chatListener = db.ref('chats/'+roomId+'/msgs').on('value', snap => {
     const msgs = [];
     snap.forEach(c => msgs.push({...c.val(), _key: c.key}));
-    const el = document.getElementById('chatMsgs');
-    if (!el) return;
+    const chatEl = document.getElementById('chatMsgs');
+    if (!chatEl) return;
 
     if (!msgs.length) {
-      el.innerHTML = '<div style="text-align:center;color:#bbb;font-size:.8rem;padding:20px">Belum ada pesan. Mulai percakapan!</div>';
+      chatEl.innerHTML = '<div style="text-align:center;color:#bbb;font-size:.8rem;padding:30px 20px">👋 Belum ada pesan.<br>Mulai percakapan sekarang!</div>';
     } else {
-      el.innerHTML = msgs.map(m => {
-        let isMine;
-        if (ROLE === 'penjual') {
-          isMine = m.pengirim === 'penjual' && m.senderId === ME.id;
-        } else {
-          isMine = m.pengirim === 'pembeli' && m.senderId === ME.id;
-        }
-        const teks = String(m.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        return `<div class="msg ${isMine?'me':'them'}">
-          <div>${teks}</div>
-          <div class="mt">${m.waktu||''}</div>
+      chatEl.innerHTML = msgs.map(m => {
+        // Cek apakah pesan ini dari saya
+        const isMine = m.senderId === ME.id;
+        const teks = String(m.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+        const waktu = m.waktu || '';
+        const nama = m.senderName || (m.pengirim === 'penjual' ? 'Penjual' : 'Pembeli');
+        return `<div style="display:flex;flex-direction:column;align-items:${isMine?'flex-end':'flex-start'};margin-bottom:8px">
+          ${!isMine?`<div style="font-size:.65rem;color:#aaa;margin-bottom:2px;padding-left:4px">${nama}</div>`:''}
+          <div style="max-width:78%;padding:9px 13px;border-radius:${isMine?'16px 16px 4px 16px':'16px 16px 16px 4px'};background:${isMine?'var(--H)':'#f0f0e8'};color:${isMine?'#fff':'var(--B)'};font-size:.83rem;line-height:1.5;word-break:break-word;box-shadow:0 1px 3px rgba(0,0,0,.08)">
+            ${teks}
+            <div style="font-size:.6rem;opacity:.6;margin-top:4px;text-align:right">${waktu}${isMine?' ✓':''}</div>
+          </div>
         </div>`;
       }).join('');
     }
-    setTimeout(() => { if(el) el.scrollTop = el.scrollHeight; }, 50);
+    // Auto scroll ke bawah
+    setTimeout(() => { chatEl.scrollTop = chatEl.scrollHeight; }, 30);
   });
 }
 
@@ -1449,8 +1484,9 @@ function kirimPesan() {
   if (!curChat) { toast('err','Pilih percakapan dulu!'); return; }
   if (!ME) { toast('err','Login dulu!'); return; }
 
-  // Clear input SEGERA — ini mencegah double-send jika user klik cepat
+  // Clear input dulu supaya tidak double send
   inputEl.value = '';
+  inputEl.focus();
 
   const pesan = {
     pengirim: ROLE === 'penjual' ? 'penjual' : 'pembeli',
@@ -1462,11 +1498,14 @@ function kirimPesan() {
   };
 
   db.ref('chats/'+curChat+'/msgs').push(pesan)
-    .then(() => db.ref('chats/'+curChat).update({lastMsg: txt, lastTs: Date.now()}))
+    .then(() => {
+      // Update lastMsg di room supaya daftar chat juga update
+      db.ref('chats/'+curChat).update({lastMsg: txt, lastTs: Date.now()});
+    })
     .catch(e => {
-      inputEl.value = txt; // kembalikan teks jika gagal
-      if(e.message&&e.message.toLowerCase().includes('permission')){
-        toast('err','❌ Akses ditolak Firebase. Hubungi admin untuk set Rules database!');
+      inputEl.value = txt; // kembalikan teks kalau gagal
+      if (e.message && e.message.toLowerCase().includes('permission')) {
+        toast('err','❌ Firebase Rules belum diset! Buka Firebase Console → Realtime Database → Rules → ubah ke test mode');
       } else {
         toast('err','Gagal kirim: '+e.message);
       }
@@ -1474,10 +1513,12 @@ function kirimPesan() {
 }
 
 function backChat() {
-  if (curChat) {
-    db.ref('chats/'+curChat+'/msgs').off('value');
-    curChat = null;
+  // Matikan listener pesan saat kembali ke daftar
+  if (_chatListener && curChat) {
+    db.ref('chats/'+curChat+'/msgs').off('value', _chatListener);
+    _chatListener = null;
   }
+  curChat = null;
   document.getElementById('chatListView').style.display = 'block';
   document.getElementById('chatBoxView').style.display = 'none';
   renderChatList();
@@ -1720,10 +1761,20 @@ function gantiUser(){
 // ============================================================
 function showOv(id){document.getElementById(id).classList.add('on');}
 function hideOv(id){
-  // Kalau ovChat ditutup, matikan listener chat agar tidak memory leak
-  if(id==='ovChat'&&curChat){
-    db.ref('chats/'+curChat+'/msgs').off('value');
+  if(id==='ovChat'){
+    // Matikan semua listener chat saat modal ditutup
+    if(_chatListener&&curChat){
+      db.ref('chats/'+curChat+'/msgs').off('value',_chatListener);
+      _chatListener=null;
+    }
+    if(_chatListListener){
+      db.ref('chats').off('value',_chatListListener);
+      _chatListListener=null;
+    }
     curChat=null;
+    // Reset tampilan ke daftar chat
+    document.getElementById('chatListView').style.display='block';
+    document.getElementById('chatBoxView').style.display='none';
   }
   document.getElementById(id).classList.remove('on');
 }
