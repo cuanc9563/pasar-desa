@@ -691,7 +691,7 @@ const db = firebase.database();
 let AU='admin', AP='makaaruyen2024';
 let ME=null, ROLE='pembeli';
 let cart=[], activeCat='all', uploadedImg=null;
-let curProd=null, curChat=null, detQty=1, revStars=5;
+let curProd=null, curChat=null, curChat_penjual=null, curChat_userId=null, detQty=1, revStars=5;
 let allProducts=[], allOrders=[], allUsers=[];
 
 const SL={pending:{l:'Menunggu',c:'sp'},processing:{l:'Diproses',c:'spr'},shipped:{l:'Dikirim',c:'ssh'},done:{l:'Selesai',c:'sdn'}};
@@ -1089,6 +1089,18 @@ function pesanSekarang(){
   if(!name){toast('err','Nama penerima harus diisi!');return;}
   if(!phone){toast('err','No. HP harus diisi!');return;}
   if(!addr){toast('err','Alamat harus diisi!');return;}
+  
+  // Cek apakah file bukti sedang diproses (belum selesai dibaca)
+  const buktiInput = document.getElementById('buktiBayar');
+  if (buktiInput && buktiInput.files && buktiInput.files[0] && !buktiBayarBase64) {
+    toast('err','Harap tunggu, bukti pembayaran sedang diproses...');
+    return;
+  }
+  
+  _doSubmitPesanan(name, phone, addr);
+}
+
+function _doSubmitPesanan(name, phone, addr){
   const sub=cart.reduce((s,i)=>s+i.harga*i.qty,0);
   const ship=parseInt(document.getElementById('coSh').value)||0;
   const oid='ord'+Date.now();
@@ -1164,12 +1176,16 @@ function swOTab(el,f){document.querySelectorAll('#ovOrders .tab').forEach(t=>t.c
 let buktiBayarBase64 = null;
 function prevBukti(input) {
   const file = input.files[0];
-  if (!file) return;
+  if (!file) { buktiBayarBase64 = null; return; }
   const reader = new FileReader();
   reader.onload = e => {
     buktiBayarBase64 = e.target.result;
     document.getElementById('buktiImg').src = buktiBayarBase64;
     document.getElementById('buktiPreview').style.display = 'block';
+  };
+  reader.onerror = () => {
+    toast('err', 'Gagal membaca file gambar!');
+    buktiBayarBase64 = null;
   };
   reader.readAsDataURL(file);
 }
@@ -1273,10 +1289,11 @@ function renderChatList(){
   el.innerHTML = '<div style="text-align:center;padding:12px;color:#aaa;font-size:.8rem">Memuat...</div>';
   
   // Pembeli: lihat chat miliknya
-  // Penjual: lihat semua chat yang ditujukan ke tokonya
-  const tokoNama = ME.toko || ME.nama;
+  // Penjual: lihat semua chat yang ditujukan ke tokonya (cek nama toko dan nama penjual)
   let query;
   if (ROLE === 'penjual') {
+    // Coba dengan nama toko dulu, fallback ke nama
+    const tokoNama = ME.toko || ME.nama;
     query = db.ref('chats').orderByChild('penjual').equalTo(tokoNama);
   } else {
     query = db.ref('chats').orderByChild('userId').equalTo(ME.id);
@@ -1285,6 +1302,20 @@ function renderChatList(){
   query.once('value', snap => {
     const rooms = [];
     snap.forEach(c => rooms.push({key: c.key, ...c.val()}));
+    
+    // Jika penjual tidak dapat hasil, coba dengan nama saja
+    if (!rooms.length && ROLE === 'penjual' && ME.toko && ME.toko !== ME.nama) {
+      db.ref('chats').orderByChild('penjual').equalTo(ME.nama).once('value', snap2 => {
+        snap2.forEach(c => rooms.push({key: c.key, ...c.val()}));
+        renderChatRooms(el, rooms);
+      });
+      return;
+    }
+    renderChatRooms(el, rooms);
+  });
+}
+
+function renderChatRooms(el, rooms) {
     if (!rooms.length) {
       el.innerHTML = '<div style="text-align:center;padding:18px;color:#888;font-size:.83rem">Belum ada percakapan.<br>' +
         (ROLE==='pembeli' ? 'Buka produk → "Tanya Penjual"' : 'Belum ada pembeli yang menghubungi') + '</div>';
@@ -1300,13 +1331,12 @@ function renderChatList(){
         </div>
       </div>`;
     }).join('');
-  });
 }
 
 function chatWith(penjual){
   if(!ME){toast('err','Login dulu untuk chat!');showOv('ovLogin');return;}
   const tokoTarget = penjual;
-  const roomId = ME.id + '_' + tokoTarget.replace(/\s+/g,'_');
+  const roomId = ME.id + '_' + tokoTarget.replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_]/g,'');
   db.ref('chats/'+roomId).once('value', snap => {
     if(!snap.exists()){
       db.ref('chats/'+roomId).set({
@@ -1315,17 +1345,25 @@ function chatWith(penjual){
         penjual: tokoTarget,
         lastMsg: '',
         tgl: Date.now()
+      }).then(() => {
+        hideOv('ovOrdersMasuk');
+        openChatRoom(roomId, tokoTarget, ME.id);
+        if(!document.getElementById('ovChat').classList.contains('on')) showOv('ovChat');
       });
+    } else {
+      hideOv('ovOrdersMasuk');
+      openChatRoom(roomId, tokoTarget, ME.id);
+      if(!document.getElementById('ovChat').classList.contains('on')) showOv('ovChat');
     }
-    hideOv('ovOrdersMasuk');
-    openChatRoom(roomId, tokoTarget, ME.id);
-    if(!document.getElementById('ovChat').classList.contains('on')) showOv('ovChat');
   });
 }
 
 function openChatRoom(roomId, penjual, userId){
   if(curChat) db.ref('chats/'+curChat+'/msgs').off();
   curChat = roomId;
+  // Simpan info lawan chat untuk referensi
+  curChat_penjual = penjual;
+  curChat_userId = userId;
   const namaLawan = ROLE === 'penjual' ? (userId || penjual) : penjual;
   document.getElementById('chatWithName').textContent = namaLawan;
   document.getElementById('chatAv').textContent = (namaLawan||'?')[0].toUpperCase();
@@ -1338,7 +1376,13 @@ function openChatRoom(roomId, penjual, userId){
     snap.forEach(c => msgs.push(c.val()));
     const el = document.getElementById('chatMsgs');
     el.innerHTML = msgs.map(m => {
-      const isMine = (ROLE==='penjual') ? m.from==='penjual' : m.from==='me';
+      // Pesan "milik saya": penjual kirim = from==='penjual', pembeli kirim = from==='pembeli' atau from==='me'
+      let isMine;
+      if (ROLE === 'penjual') {
+        isMine = m.from === 'penjual';
+      } else {
+        isMine = m.from === 'pembeli' || m.from === 'me' || m.senderId === ME?.id;
+      }
       return `<div class="msg ${isMine?'me':'them'}">
         <div>${m.text}</div>
         ${m.img ? `<img src="${m.img}" style="max-width:180px;border-radius:8px;margin-top:5px;display:block">` : ''}
@@ -1352,9 +1396,18 @@ function openChatRoom(roomId, penjual, userId){
 function kirimPesan(){
   const txt = document.getElementById('chatIn').value.trim();
   if(!txt || !curChat) return;
-  const from = ROLE === 'penjual' ? 'penjual' : 'me';
-  db.ref('chats/'+curChat+'/msgs').push({from, text: txt, t: nowStr()});
-  db.ref('chats/'+curChat).update({lastMsg: txt});
+  const from = ROLE === 'penjual' ? 'penjual' : 'pembeli';
+  const senderId = ME ? ME.id : 'anonymous';
+  const senderName = ME ? ME.nama : 'Pembeli';
+  db.ref('chats/'+curChat+'/msgs').push({
+    from, senderId, senderName,
+    text: txt, t: nowStr(), ts: Date.now()
+  });
+  db.ref('chats/'+curChat).update({
+    lastMsg: txt,
+    lastTs: Date.now(),
+    lastFrom: from
+  });
   document.getElementById('chatIn').value = '';
 }
 
