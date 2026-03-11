@@ -629,7 +629,7 @@ body{font-family:"DM Sans",sans-serif;background:var(--K);color:var(--B);overflo
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #eee">
         <button onclick="backChat()" style="background:none;border:none;cursor:pointer;color:var(--H);font-size:.9rem;font-family:'DM Sans',sans-serif">← Kembali</button>
         <div class="sav" id="chatAv" style="width:32px;height:32px;font-size:.82rem">?</div>
-        <div><strong id="chatWithName" style="font-size:.84rem">-</strong><div style="font-size:.68rem;color:#888">Penjual · Desa Makaaruyen</div></div>
+        <div><strong id="chatWithName" style="font-size:.84rem">-</strong><div id="chatSubtitle" style="font-size:.68rem;color:#888">Desa Makaaruyen</div></div>
       </div>
       <div class="cm" id="chatMsgs"></div>
       <div class="chin">
@@ -838,7 +838,7 @@ function masukToko(role) {
     document.getElementById('notifBtn').style.display='inline-flex';updateNotifBadge();}
   else{badge.textContent='🛒 Mode Pembeli';badge.className='nb grn';sbtn.textContent='🏪 Toko Saya';
     document.getElementById('notifBtn').style.display='none';}
-  const nm=ME?ME.toko:'Toko Saya';
+  const nm=ME?(ME.toko||ME.nama||'Toko Saya'):'Toko Saya';
   const namaUser=ME?ME.nama:'Kamu';
   document.getElementById('modeBan').innerHTML = role==='penjual'
     ?`<div class="mban seller"><div class="mi">🏪</div><div class="mt"><h3>Mode Penjual · ${nm}</h3><p>Upload produkmu · Isi info pembayaran agar pembeli bisa transfer</p></div><div class="mb"><button class="mbb" onclick="masukToko('pembeli')">🛒 Mode Pembeli</button><button class="mbb" onclick="loadSetupToko();showOv('ovSetupToko')">⚙️ Info Bayar</button><button class="mbb pri" onclick="isiPenjual();showOv('ovAddProd')">+ Upload Produk</button></div></div>`
@@ -849,8 +849,8 @@ function masukToko(role) {
 
 function bukaTokoSaya(){if(ROLE==='penjual'){renderMyShop();showOv('ovMyShop');}else masukToko('penjual');}
 function bukaCart(){renderCart();showOv('ovCart');}
-function bukaOrders(){renderOrders('all');showOv('ovOrders');}
-function bukaChat(){renderChatList();showOv('ovChat');}
+function bukaOrders(){if(!ME){toast('err','Login dulu!');showOv('ovLogin');return;}renderOrders('all');showOv('ovOrders');}
+function bukaChat(){if(!ME){toast('err','Login dulu!');showOv('ovLogin');return;}renderChatList();showOv('ovChat');}
 
 // ============================================================
 // SETUP TOKO — simpan ke Firebase
@@ -938,7 +938,7 @@ function prevFoto(inp){
   r.readAsDataURL(file);
 }
 
-function isiPenjual(){if(ME){document.getElementById('pPj').value=ME.toko||ME.nama;}}
+function isiPenjual(){if(ME){document.getElementById('pPj').value=ME.toko||ME.nama||'Penjual';}}
 
 function addProd(){
   const nama=document.getElementById('pNm').value.trim();
@@ -971,25 +971,24 @@ function addProd(){
   }).catch(e=>{btn.textContent='🌿 Publikasikan Produk';btn.disabled=false;toast('err','Gagal upload: '+e.message);});
 }
 
-// ============================================================
-// DETAIL PRODUK
-// ============================================================
+// Fix openDetail: p.penjual bisa undefined
 function openDetail(fireKey){
   curProd=allProducts.find(p=>p.fireKey===fireKey);if(!curProd)return;
   detQty=1;const p=curProd;
   const seller=allUsers.find(u=>u.id===p.penjualId||u.toko===p.penjual);
   const rStr=p.terjual>0?`⭐ ${Number(p.rating||0).toFixed(1)} · ${p.terjual} terjual`:'Belum ada ulasan';
+  const penjualNama = p.penjual||'Penjual';
   document.getElementById('detCont').innerHTML=`
     <div class="dgrid">
       <div class="dimg">${p.img?`<img src="${p.img}" alt="${p.nama}">`:`<span>${p.emoji||'📦'}</span>`}</div>
       <div>
-        <div class="dcat">🏷️ ${p.kat.toUpperCase()}</div>
+        <div class="dcat">🏷️ ${(p.kat||'').toUpperCase()}</div>
         <div class="dnam">${p.nama}</div>
         <div class="dpri">Rp ${Number(p.harga).toLocaleString('id')} <small style="font-size:.82rem;color:#888;font-family:'DM Sans'">/ ${p.sat}</small></div>
-        <p class="ddsc">${p.desc}</p>
+        <p class="ddsc">${p.desc||''}</p>
         <div class="sbox">
-          <div class="sav">${p.penjual[0].toUpperCase()}</div>
-          <div class="sinfo"><div class="sn">🏪 ${p.penjual}</div>
+          <div class="sav">${penjualNama[0].toUpperCase()}</div>
+          <div class="sinfo"><div class="sn">🏪 ${penjualNama}</div>
             <div class="sl">📍 Desa Makaaruyen · ${rStr} · Stok: ${p.stok} ${p.sat}</div>
             ${seller&&seller.deskToko?`<div style="font-size:.7rem;color:#888;margin-top:1px">${seller.deskToko}</div>`:''}
           </div>
@@ -1001,19 +1000,23 @@ function openDetail(fireKey){
         </div>
         <div class="dbtns">
           <button class="fbtn" onclick="addCartDet()">🛒 Tambah ke Keranjang</button>
-          <button class="fbtn sec" onclick="chatWith('${p.penjual}')">💬 Tanya Penjual</button>
+          <button class="fbtn sec" onclick="chatWith('${penjualNama.replace(/'/g,"\\'")}')">💬 Tanya Penjual</button>
         </div>
       </div>
     </div>`;
   renderRevList(fireKey);showOv('ovDetail');
 }
 function chgQty(d){detQty=Math.min(curProd?curProd.stok:99,Math.max(1,detQty+d));document.getElementById('dQty').textContent=detQty;}
-function addCartDet(){if(!curProd)return;for(let i=0;i<detQty;i++)addCart(curProd.fireKey,false);toast('ok',`✅ ${detQty}× ${curProd.nama} ditambahkan`);updateCartCount();hideOv('ovDetail');}
+function addCartDet(){
+  if(!ME){toast('err','Login dulu untuk belanja!');showOv('ovLogin');return;}
+  if(!curProd)return;for(let i=0;i<detQty;i++)addCart(curProd.fireKey,false);toast('ok',`✅ ${detQty}× ${curProd.nama} ditambahkan`);updateCartCount();hideOv('ovDetail');
+}
 
 // ============================================================
 // CART
 // ============================================================
 function addCart(fireKey,notify=true){
+  if(!ME){toast('err','Login dulu untuk belanja!');showOv('ovLogin');return;}
   const p=allProducts.find(x=>x.fireKey===fireKey);if(!p)return;
   if(p.stok<=0){toast('err','Stok habis!');return;}
   const ex=cart.find(x=>x.fireKey===fireKey);
@@ -1133,7 +1136,13 @@ function _doSubmitPesanan(name, phone, addr){
     hideOv('ovCheckout');
     toast('ok','🎉 Pesanan berhasil! '+oid+' · Segera transfer ke penjual!');
     setTimeout(()=>{renderOrders('all');showOv('ovOrders');},700);
-  }).catch(e=>toast('err','Gagal: '+e.message));
+  }).catch(e=>{
+    if(e.message&&e.message.toLowerCase().includes('permission')){
+      toast('err','❌ Akses ditolak Firebase. Set Rules database ke write:true di Firebase Console!');
+    } else {
+      toast('err','Gagal: '+e.message);
+    }
+  });
 }
 
 // ============================================================
@@ -1143,6 +1152,7 @@ let oFilter='all';
 function renderOrders(f){
   oFilter=f||oFilter;
   const el=document.getElementById('orderList');
+  if(!ME){el.innerHTML='<div style="text-align:center;padding:32px;color:#888">Silakan login dulu.</div>';return;}
   const myOrders=allOrders.filter(o=>o.buyerId===ME.id||o.buyer===ME.nama);
   const list=oFilter==='all'?myOrders:myOrders.filter(o=>o.status===oFilter);
   if(!list.length){el.innerHTML='<div style="text-align:center;padding:32px;color:#888"><div style="font-size:2.3rem;margin-bottom:9px">📦</div>Belum ada pesanan</div>';return;}
@@ -1207,7 +1217,7 @@ function renderOrdersMasuk(f) {
   const el = document.getElementById('orderMasukList');
   if (!ME) return;
   // Ambil pesanan yang mengandung produk dari toko penjual ini
-  const tokoNama = ME.toko || ME.nama;
+  const tokoNama = ME.toko || ME.nama || '';
   const myOrders = allOrders.filter(o =>
     (o.items || []).some(i => i.penjual === tokoNama || i.penjual === ME.nama)
   );
@@ -1264,14 +1274,15 @@ function swOMTab(el, f) {
 
 function updateNotifBadge() {
   if (!ME || ROLE !== 'penjual') return;
-  const tokoNama = ME.toko || ME.nama;
+  const tokoNama = ME.toko || ME.nama || '';
   const pending = allOrders.filter(o =>
     o.status === 'pending' &&
     (o.items || []).some(i => i.penjual === tokoNama || i.penjual === ME.nama)
   ).length;
   const btn = document.getElementById('notifBtn');
   const badge = document.getElementById('notifCount');
-  if (btn) btn.style.display = 'inline-flex';
+  if (!btn || !badge) return;
+  btn.style.display = 'inline-flex';
   if (pending > 0) {
     badge.style.display = 'flex';
     badge.textContent = pending;
@@ -1281,150 +1292,205 @@ function updateNotifBadge() {
 }
 
 // ============================================================
-// CHAT — Firebase real-time (PENJUAL & PEMBELI)
+// CHAT — REWRITE TOTAL (fix bug: pesan hilang setelah kirim ke-1)
+// Root cause: listener .on('value') ditimpa tanpa di-off() dulu,
+// menyebabkan konflik double listener. Firebase Rules juga perlu
+// diset ke ".write": true agar semua user bisa push pesan.
 // ============================================================
-function renderChatList(){
+
+// Buat room ID yang bersih dan konsisten
+function makeChatRoomId(buyerId, penjualName) {
+  const safe = penjualName.replace(/[^a-zA-Z0-9]/g,'_').substring(0,30);
+  return buyerId + '__' + safe;
+}
+
+function renderChatList() {
   if (!ME) return;
   const el = document.getElementById('chatList');
   el.innerHTML = '<div style="text-align:center;padding:12px;color:#aaa;font-size:.8rem">Memuat...</div>';
-  
-  // Pembeli: lihat chat miliknya
-  // Penjual: lihat semua chat yang ditujukan ke tokonya (cek nama toko dan nama penjual)
+
+  // Gunakan buyerId untuk query pembeli (lebih reliable dari userId)
   let query;
   if (ROLE === 'penjual') {
-    // Coba dengan nama toko dulu, fallback ke nama
     const tokoNama = ME.toko || ME.nama;
     query = db.ref('chats').orderByChild('penjual').equalTo(tokoNama);
   } else {
-    query = db.ref('chats').orderByChild('userId').equalTo(ME.id);
+    query = db.ref('chats').orderByChild('buyerId').equalTo(ME.id);
   }
-  
+
   query.once('value', snap => {
     const rooms = [];
     snap.forEach(c => rooms.push({key: c.key, ...c.val()}));
-    
-    // Jika penjual tidak dapat hasil, coba dengan nama saja
+    // Fallback penjual: coba dengan ME.nama jika toko tidak dapat hasil
     if (!rooms.length && ROLE === 'penjual' && ME.toko && ME.toko !== ME.nama) {
       db.ref('chats').orderByChild('penjual').equalTo(ME.nama).once('value', snap2 => {
         snap2.forEach(c => rooms.push({key: c.key, ...c.val()}));
-        renderChatRooms(el, rooms);
+        _tampilDaftarChat(el, rooms);
       });
       return;
     }
-    renderChatRooms(el, rooms);
+    _tampilDaftarChat(el, rooms);
   });
 }
 
-function renderChatRooms(el, rooms) {
-    if (!rooms.length) {
-      el.innerHTML = '<div style="text-align:center;padding:18px;color:#888;font-size:.83rem">Belum ada percakapan.<br>' +
-        (ROLE==='pembeli' ? 'Buka produk → "Tanya Penjual"' : 'Belum ada pembeli yang menghubungi') + '</div>';
-      return;
-    }
-    el.innerHTML = rooms.map(r => {
-      const nama = ROLE === 'penjual' ? (r.userName || r.userId) : r.penjual;
-      return `<div style="display:flex;align-items:center;gap:10px;padding:9px;border-radius:8px;cursor:pointer;border-bottom:1px solid #f0f0e8;transition:background .15s" onmouseover="this.style.background='#f8f8f0'" onmouseout="this.style.background=''" onclick="openChatRoom('${r.key}','${r.penjual}','${r.userId}')">
-        <div class="sav" style="width:34px;height:34px;font-size:.82rem">${(nama||'?')[0].toUpperCase()}</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:700;font-size:.83rem">${nama||'-'}</div>
-          <div style="font-size:.71rem;color:#888;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${r.lastMsg||'Mulai percakapan...'}</div>
-        </div>
-      </div>`;
-    }).join('');
+function _tampilDaftarChat(el, rooms) {
+  if (!rooms.length) {
+    el.innerHTML = '<div style="text-align:center;padding:18px;color:#888;font-size:.83rem">Belum ada percakapan.<br>' +
+      (ROLE==='pembeli' ? 'Buka produk → "Tanya Penjual"' : 'Belum ada pembeli yang menghubungi') + '</div>';
+    return;
+  }
+  el.innerHTML = rooms.map(r => {
+    const nama = ROLE === 'penjual' ? (r.buyerName || r.buyerId || 'Pembeli') : (r.penjual || 'Penjual');
+    // Encode parameter untuk onclick agar aman
+    const bName = (r.buyerName||'').replace(/'/g,"\\'");
+    return `<div style="display:flex;align-items:center;gap:10px;padding:9px;border-radius:8px;cursor:pointer;border-bottom:1px solid #f0f0e8;transition:background .15s"
+      onmouseover="this.style.background='#f8f8f0'" onmouseout="this.style.background=''"
+      onclick="_bukaRoom('${r.key}','${(r.penjual||'').replace(/'/g,"\\'")}','${r.buyerId||''}','${bName}')">
+      <div class="sav" style="width:34px;height:34px;font-size:.82rem">${(nama||'?')[0].toUpperCase()}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.83rem">${nama}</div>
+        <div style="font-size:.71rem;color:#888;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${r.lastMsg||'Mulai percakapan...'}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-function chatWith(penjual){
-  if(!ME){toast('err','Login dulu untuk chat!');showOv('ovLogin');return;}
-  const tokoTarget = penjual;
-  const roomId = ME.id + '_' + tokoTarget.replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_]/g,'');
+function chatWith(targetName) {
+  if (!ME) { toast('err','Login dulu untuk chat!'); showOv('ovLogin'); return; }
+
+  let roomId, penjualName, buyerId, buyerName;
+  if (ROLE === 'penjual') {
+    // Penjual chat ke pembeli
+    const buyer = allUsers.find(u => u.nama === targetName || u.id === targetName);
+    buyerId = buyer ? buyer.id : ('buyer_'+targetName.replace(/[^a-zA-Z0-9]/g,'_'));
+    buyerName = buyer ? buyer.nama : targetName;
+    penjualName = ME.toko || ME.nama;
+    roomId = makeChatRoomId(buyerId, penjualName);
+  } else {
+    // Pembeli chat ke penjual
+    penjualName = targetName;
+    buyerId = ME.id;
+    buyerName = ME.nama;
+    roomId = makeChatRoomId(ME.id, penjualName);
+  }
+
   db.ref('chats/'+roomId).once('value', snap => {
-    if(!snap.exists()){
+    const doOpen = () => {
+      hideOv('ovOrdersMasuk');
+      _bukaRoom(roomId, penjualName, buyerId, buyerName);
+      if (!document.getElementById('ovChat').classList.contains('on')) showOv('ovChat');
+    };
+    if (!snap.exists()) {
       db.ref('chats/'+roomId).set({
-        userId: ME.id,
-        userName: ME.nama,
-        penjual: tokoTarget,
+        penjual: penjualName,
+        buyerId: buyerId,
+        buyerName: buyerName,
         lastMsg: '',
         tgl: Date.now()
-      }).then(() => {
-        hideOv('ovOrdersMasuk');
-        openChatRoom(roomId, tokoTarget, ME.id);
-        if(!document.getElementById('ovChat').classList.contains('on')) showOv('ovChat');
-      });
+      }).then(doOpen).catch(e => toast('err','Gagal membuat chat: '+e.message));
     } else {
-      hideOv('ovOrdersMasuk');
-      openChatRoom(roomId, tokoTarget, ME.id);
-      if(!document.getElementById('ovChat').classList.contains('on')) showOv('ovChat');
+      doOpen();
     }
   });
 }
 
-function openChatRoom(roomId, penjual, userId){
-  if(curChat) db.ref('chats/'+curChat+'/msgs').off();
+function _bukaRoom(roomId, penjualName, buyerId, buyerName) {
+  // PENTING: Matikan listener lama sebelum attach baru
+  // Ini adalah fix utama untuk bug "pesan hilang setelah kirim pertama"
+  if (curChat && curChat !== roomId) {
+    db.ref('chats/'+curChat+'/msgs').off('value');
+  }
+
   curChat = roomId;
-  // Simpan info lawan chat untuk referensi
-  curChat_penjual = penjual;
-  curChat_userId = userId;
-  const namaLawan = ROLE === 'penjual' ? (userId || penjual) : penjual;
+  curChat_penjual = penjualName;
+  curChat_userId = buyerId;
+
+  const namaLawan = ROLE === 'penjual' ? (buyerName || buyerId || 'Pembeli') : (penjualName || 'Penjual');
   document.getElementById('chatWithName').textContent = namaLawan;
   document.getElementById('chatAv').textContent = (namaLawan||'?')[0].toUpperCase();
   document.getElementById('chatListView').style.display = 'none';
   document.getElementById('chatBoxView').style.display = 'block';
-  if(!document.getElementById('ovChat').classList.contains('on')) showOv('ovChat');
-  
+  document.getElementById('chatIn').value = '';
+
+  if (!document.getElementById('ovChat').classList.contains('on')) showOv('ovChat');
+
+  // Attach listener real-time — akan update otomatis setiap ada pesan baru
   db.ref('chats/'+roomId+'/msgs').on('value', snap => {
     const msgs = [];
-    snap.forEach(c => msgs.push(c.val()));
+    snap.forEach(c => msgs.push({...c.val(), _key: c.key}));
     const el = document.getElementById('chatMsgs');
-    el.innerHTML = msgs.map(m => {
-      // Pesan "milik saya": penjual kirim = from==='penjual', pembeli kirim = from==='pembeli' atau from==='me'
-      let isMine;
-      if (ROLE === 'penjual') {
-        isMine = m.from === 'penjual';
+    if (!el) return;
+
+    if (!msgs.length) {
+      el.innerHTML = '<div style="text-align:center;color:#bbb;font-size:.8rem;padding:20px">Belum ada pesan. Mulai percakapan!</div>';
+    } else {
+      el.innerHTML = msgs.map(m => {
+        let isMine;
+        if (ROLE === 'penjual') {
+          isMine = m.pengirim === 'penjual' && m.senderId === ME.id;
+        } else {
+          isMine = m.pengirim === 'pembeli' && m.senderId === ME.id;
+        }
+        const teks = String(m.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return `<div class="msg ${isMine?'me':'them'}">
+          <div>${teks}</div>
+          <div class="mt">${m.waktu||''}</div>
+        </div>`;
+      }).join('');
+    }
+    setTimeout(() => { if(el) el.scrollTop = el.scrollHeight; }, 50);
+  });
+}
+
+function kirimPesan() {
+  const inputEl = document.getElementById('chatIn');
+  const txt = inputEl.value.trim();
+  if (!txt) return;
+  if (!curChat) { toast('err','Pilih percakapan dulu!'); return; }
+  if (!ME) { toast('err','Login dulu!'); return; }
+
+  // Clear input SEGERA — ini mencegah double-send jika user klik cepat
+  inputEl.value = '';
+
+  const pesan = {
+    pengirim: ROLE === 'penjual' ? 'penjual' : 'pembeli',
+    senderId: ME.id,
+    senderName: ME.nama,
+    text: txt,
+    waktu: new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}),
+    ts: Date.now()
+  };
+
+  db.ref('chats/'+curChat+'/msgs').push(pesan)
+    .then(() => db.ref('chats/'+curChat).update({lastMsg: txt, lastTs: Date.now()}))
+    .catch(e => {
+      inputEl.value = txt; // kembalikan teks jika gagal
+      if(e.message&&e.message.toLowerCase().includes('permission')){
+        toast('err','❌ Akses ditolak Firebase. Hubungi admin untuk set Rules database!');
       } else {
-        isMine = m.from === 'pembeli' || m.from === 'me' || m.senderId === ME?.id;
+        toast('err','Gagal kirim: '+e.message);
       }
-      return `<div class="msg ${isMine?'me':'them'}">
-        <div>${m.text}</div>
-        ${m.img ? `<img src="${m.img}" style="max-width:180px;border-radius:8px;margin-top:5px;display:block">` : ''}
-        <div class="mt">${m.t}</div>
-      </div>`;
-    }).join('');
-    setTimeout(() => el.scrollTop = el.scrollHeight, 50);
-  });
+    });
 }
 
-function kirimPesan(){
-  const txt = document.getElementById('chatIn').value.trim();
-  if(!txt || !curChat) return;
-  const from = ROLE === 'penjual' ? 'penjual' : 'pembeli';
-  const senderId = ME ? ME.id : 'anonymous';
-  const senderName = ME ? ME.nama : 'Pembeli';
-  db.ref('chats/'+curChat+'/msgs').push({
-    from, senderId, senderName,
-    text: txt, t: nowStr(), ts: Date.now()
-  });
-  db.ref('chats/'+curChat).update({
-    lastMsg: txt,
-    lastTs: Date.now(),
-    lastFrom: from
-  });
-  document.getElementById('chatIn').value = '';
-}
-
-function backChat(){
-  if(curChat) db.ref('chats/'+curChat+'/msgs').off();
-  curChat = null;
+function backChat() {
+  if (curChat) {
+    db.ref('chats/'+curChat+'/msgs').off('value');
+    curChat = null;
+  }
   document.getElementById('chatListView').style.display = 'block';
   document.getElementById('chatBoxView').style.display = 'none';
   renderChatList();
 }
 
-function newChat(){
+function newChat() {
+  if(!ME){toast('err','Login dulu untuk chat!');showOv('ovLogin');return;}
   const n = prompt('Nama toko penjual yang ingin dihubungi:');
-  if(n && n.trim()) chatWith(n.trim());
+  if(!n||!n.trim())return;
+  const target=n.trim();
+  if(ROLE==='pembeli'&&(target===ME.nama||target===ME.toko)){toast('err','Tidak bisa chat ke diri sendiri!');return;}
+  chatWith(target);
 }
-
-function nowStr(){return new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});}
 
 
 // ============================================================
@@ -1440,6 +1506,7 @@ function renderRevList(fireKey){
   });
 }
 function kirimRev(){
+  if(!ME){toast('err','Login dulu untuk kirim ulasan!');showOv('ovLogin');return;}
   const txt=document.getElementById('revTxt').value.trim();if(!txt){toast('err','Tulis ulasan dulu!');return;}if(!curProd)return;
   const rev={user:ME?ME.nama:'Pembeli',stars:revStars,text:txt,tgl:new Date().toLocaleDateString('id-ID')};
   db.ref('reviews/'+curProd.fireKey).push(rev).then(()=>{
@@ -1458,12 +1525,13 @@ function kirimRev(){
 // ============================================================
 function renderMyShop(){
   if(!ME)return;
+  const tokoNama = ME.toko || ME.nama || 'Toko Saya';
   const py=ME.payment||{};
   const hasPay=py.bank||py.dana||py.gopay||py.ovo;
   document.getElementById('myShopInfo').innerHTML=`
     <div style="display:flex;align-items:center;gap:11px;flex-wrap:wrap">
-      <div style="width:46px;height:46px;background:var(--H);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.25rem;font-weight:800;flex-shrink:0">${ME.toko[0].toUpperCase()}</div>
-      <div style="flex:1"><div style="font-weight:700;font-size:.95rem">${ME.toko}</div>
+      <div style="width:46px;height:46px;background:var(--H);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.25rem;font-weight:800;flex-shrink:0">${tokoNama[0].toUpperCase()}</div>
+      <div style="flex:1"><div style="font-weight:700;font-size:.95rem">${tokoNama}</div>
         <div style="font-size:.74rem;color:#888;margin-top:2px">📍 Desa Makaaruyen · ${ME.nama}</div>
         ${ME.deskToko?`<div style="font-size:.74rem;color:#777;margin-top:2px">${ME.deskToko}</div>`:''}
       </div>
@@ -1471,7 +1539,7 @@ function renderMyShop(){
         ${hasPay?'✅ Info pembayaran sudah diisi':'⚠️ Belum isi info pembayaran!'}
       </div>
     </div>`;
-  const myProds=allProducts.filter(p=>p.penjualId===ME.id||p.penjual===ME.toko);
+  const myProds=allProducts.filter(p=>p.penjualId===ME.id||p.penjual===tokoNama||p.penjual===ME.nama);
   if(!myProds.length){document.getElementById('myProdList').innerHTML='<div style="text-align:center;padding:24px;color:#888;font-size:.84rem">Belum ada produk. Klik "Upload Produk" untuk mulai.</div>';return;}
   document.getElementById('myProdList').innerHTML=myProds.map(p=>`
     <div style="display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid #f0f0e8">
@@ -1651,7 +1719,14 @@ function gantiUser(){
 // OVERLAY HELPERS
 // ============================================================
 function showOv(id){document.getElementById(id).classList.add('on');}
-function hideOv(id){document.getElementById(id).classList.remove('on');}
+function hideOv(id){
+  // Kalau ovChat ditutup, matikan listener chat agar tidak memory leak
+  if(id==='ovChat'&&curChat){
+    db.ref('chats/'+curChat+'/msgs').off('value');
+    curChat=null;
+  }
+  document.getElementById(id).classList.remove('on');
+}
 function swTab(el,id){
   el.closest('.modal').querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));el.classList.add('on');
   ['tMasuk','tDaftar'].forEach(t=>{const e=document.getElementById(t);if(e)e.style.display='none';});
